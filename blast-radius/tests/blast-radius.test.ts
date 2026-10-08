@@ -164,4 +164,32 @@ describe("blast-radius holds", () => {
     expect(state.ran).toBe(false);
     await ui.unmount();
   });
+
+  test("git push --force lists the remote commits the push would drop", async ($, on) => {
+    let logRange = "";
+    const { clock, state } = heldRm(on, true, (argv) => {
+      if (argv[1] === "rev-parse" && argv[2] === "--abbrev-ref") return "main\n";
+      if (argv[1] === "rev-parse") return ""; // --verify origin/main: known
+      if (argv[1] === "log") {
+        logRange = argv[argv.length - 1];
+        return "a1b2c3d Fix login redirect\n9f8e7d6 Bump deps\n";
+      }
+      return "";
+    });
+    const call = $.tool.call({ tool: "Bash", command: "git push --force" } as any);
+    await clock.settle();
+
+    expect(logRange).toBe("HEAD..origin/main");
+    const ui = await $.ui.mount(PANE);
+    expect(await ui.find({ type: "Text", text: /force-push to origin\/main: drops 2 commits/ })).toBeDefined();
+    expect(await ui.find({ type: "Text", text: /a1b2c3d Fix login redirect/ })).toBeDefined();
+    expect(await ui.find({ type: "Text", text: /9f8e7d6 Bump deps/ })).toBeDefined();
+    await ui.press({ key: "cancel" });
+    await clock.advance(300);
+
+    const result = (await call) as any;
+    expect(result.deny).toMatch(/drops 2 commits/);
+    expect(state.ran).toBe(false);
+    await ui.unmount();
+  });
 });
