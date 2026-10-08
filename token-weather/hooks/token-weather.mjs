@@ -34,7 +34,10 @@ export function register(on) {
       return next(e);
     }
     const { Box, Text } = $.ui.resolve(e);
-    return band(Box, Text, history, e.props.bodyColumns);
+    // Compose with what other plugins draw beneath (next-steps, blast-radius).
+    const below = await next(e);
+    const weather = band(Box, Text, history, e.props.bodyColumns);
+    return below ? Box({ flexDirection: "column", children: [weather, below] }) : weather;
   });
 }
 

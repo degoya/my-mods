@@ -10,6 +10,7 @@ describe("token-weather", () => {
       value: { startedAt: 0, rateLimits: [], context: { tokens, window: 200_000, percent: Math.round(tokens / 2_000) } },
     }));
     on("turn.complete", () => ({ text: "" }));
+    on("ui.render", ($, e) => $.ui.resolve(e).Text({ children: "" }));
 
     await $.session.start({ surface: "terminal", isInteractive: true, cwd: "/work" } as any);
     const ui = await $.ui.mount({
@@ -25,6 +26,22 @@ describe("token-weather", () => {
     expect(await ui.find({ type: "Text", text: /Showers/ })).toBeDefined();
     expect(await ui.find({ type: "Text", text: /67% of context/ })).toBeDefined();
     expect(await ui.find({ type: "Text", text: /▲ \+98\.3k last turn/ })).toBeDefined();
+    await ui.unmount();
+  });
+});
+
+describe("token-weather composes", () => {
+  test("whatever is drawn beneath stays visible", async ($, on) => {
+    on("session.start", ($, e) => ({ cwd: e.cwd }));
+    on("session.usage", () => ({ value: { startedAt: 0, rateLimits: [], context: { tokens: 10_000, window: 200_000, percent: 5 } } }));
+    on("ui.render", ($, e) => $.ui.resolve(e).Text({ children: "beneath" }));
+    await $.session.start({ surface: "terminal", isInteractive: true, cwd: "/work" } as any);
+    const ui = await $.ui.mount({
+      plugin: "token-weather", surface: "terminal", component: "AbovePrompt",
+      props: { hasSurvey: false, isWorking: false, maxRows: 10, bodyColumns: 120 },
+    } as any);
+    expect(await ui.find({ type: "Text", text: /Clear/ })).toBeDefined();
+    expect(await ui.find({ type: "Text", text: /beneath/ })).toBeDefined();
     await ui.unmount();
   });
 });
