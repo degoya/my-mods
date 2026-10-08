@@ -226,10 +226,19 @@ function segments(command) {
     } else if (quote === null && c === "$" && next === "'") {
       quote = "$'";
       cur += c + command[(i += 1)];
-    } else if (quote === null && c === "#" && (i === 0 || /\s/.test(command[i - 1]))) {
+    } else if (quote === null && c === "#" && (i === 0 || /[\s;&|()<>]/.test(command[i - 1]))) {
+      const start = i;
       while (i + 1 < command.length && command[i + 1] !== "\n") {
         i += 1; // a comment runs to the newline, which still separates
       }
+      // Bash reads # as text after an escaped space, inside ${ } or (( )). A
+      // separator in what was skipped may then be real: judge the naive split too.
+      if (/&&|\|\||;|\|/.test(command.slice(start, i + 1))) {
+        isUnsure = true;
+      }
+    } else if (quote === null && c === "#") {
+      cur += c;
+      isUnsure = true; // # inside a word is no comment, but judge the naive split too
     } else if (quote === null && c === "<" && next === "<") {
       cur += c;
       isUnsure = true; // a heredoc body is not lexed here: judge the naive split too

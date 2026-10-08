@@ -250,6 +250,11 @@ describe("blast-radius holds", () => {
       'echo "$(echo "(x)") || rm -rf build"', // quoted text, but a substitution is on the line: fail closed
       "echo \"it's\" $(rm -rf build) 'x'", // an apostrophe in double quotes doesn't start a single quote
       'echo x # "\nrm -rf build # "', // a quote in a comment is no quote
+      'echo x;# "\nrm -rf build;# "', // a comment can follow an operator without a space
+      '(# "\nrm -rf build) # "', // or an opening paren
+      "echo a\\ #; rm -rf build", // an escaped space: the # is text, the ; is real
+      "echo ${x:- #} ; rm -rf build", // # inside ${ } is text
+      "(( 1 #)) ; rm -rf build", // # inside (( )) is text
       "echo $'a\\'b' && rm -rf build # '", // $'…' escapes the quote with a backslash
       'cat <<EOF\n"\nEOF\nrm -rf build\ncat <<EOF\n"\nEOF', // heredoc bodies aren't lexed: fail closed
     ]) {
