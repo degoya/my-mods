@@ -256,6 +256,7 @@ describe("blast-radius holds", () => {
       "echo ${x:- #} ; rm -rf build", // # inside ${ } is text
       "(( 1 #)) ; rm -rf build", // # inside (( )) is text
       "echo a\\ #$(rm -rf build)", // a substitution after a # that bash reads as text
+      "echo $$'a\\'; rm -rf build; echo 'b\\''", // $$ then a plain quote, not ANSI-C: the rm is outside it
       "echo $'a\\'b' && rm -rf build # '", // $'…' escapes the quote with a backslash
       'cat <<EOF\n"\nEOF\nrm -rf build\ncat <<EOF\n"\nEOF', // heredoc bodies aren't lexed: fail closed
     ]) {
