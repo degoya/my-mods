@@ -22,9 +22,12 @@ describe("blast-radius", () => {
   });
 });
 
-// The world beneath a held rm -rf: cwd, a placed pane, and process.run answering
-// the measuring script with four files, and `sleep` with a wait on the mock clock.
-function heldRm(on: any, placed = true) {
+// process.run's stdout for the rm measuring script: four files in ./build.
+const RM_FILES = "4 73728 1\n./build/a.js\n./build/b.js\n./build/c.js\n./build/d.js\n";
+
+// The world beneath a held command: cwd, a pane (placed or not), `sleep` as a
+// wait on the mock clock, and every other process answered by `run(argv)`.
+function heldRm(on: any, placed = true, run: (argv: readonly string[]) => string = () => RM_FILES) {
   const clock = mock.clock(on);
   const state = { ran: false };
   on("tool.call", { tool: "Bash" }, () => {
@@ -42,7 +45,7 @@ function heldRm(on: any, placed = true) {
       await clock.sleep(250);
       return { value: { ...ok, stdout: "" } };
     }
-    return { value: { ...ok, stdout: "4 73728 1\n./build/a.js\n./build/b.js\n./build/c.js\n./build/d.js\n" } };
+    return { value: { ...ok, stdout: run(e.argv) } };
   });
   return { clock, state };
 }
@@ -107,6 +110,30 @@ describe("blast-radius holds", () => {
 
     const result = (await call) as any;
     expect(result.deny).toMatch(/the user pressed Cancel/);
+    expect(state.ran).toBe(false);
+    await ui.unmount();
+  });
+
+  test("git reset --hard lists the files with uncommitted changes", async ($, on) => {
+    const { clock, state } = heldRm(on, true, (argv) => {
+      if (argv[1] === "status") return " M src/app.ts\nA  src/new.ts\n?? notes.txt\n";
+      if (argv[1] === "diff") return " 2 files changed, 10 insertions(+), 3 deletions(-)\n";
+      return "";
+    });
+    const call = $.tool.call({ tool: "Bash", command: "git reset --hard" } as any);
+    await clock.settle();
+
+    const ui = await $.ui.mount(PANE);
+    expect(await ui.find({ type: "Text", text: /discard uncommitted changes in 2 files/ })).toBeDefined();
+    expect(await ui.find({ type: "Text", text: /src\/app\.ts/ })).toBeDefined();
+    expect(await ui.find({ type: "Text", text: /src\/new\.ts/ })).toBeDefined();
+    expect(await ui.find({ type: "Text", text: /notes\.txt/ })).toBeUndefined(); // untracked: reset --hard keeps it
+    expect(await ui.find({ type: "Text", text: /2 files changed/ })).toBeDefined();
+    await ui.press({ key: "cancel" });
+    await clock.advance(300);
+
+    const result = (await call) as any;
+    expect(result.deny).toMatch(/discard uncommitted changes in 2 files/);
     expect(state.ran).toBe(false);
     await ui.unmount();
   });
