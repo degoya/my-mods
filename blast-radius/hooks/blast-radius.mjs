@@ -136,12 +136,29 @@ function joinDir(dir, arg) {
   return dir ? `${dir}/${arg}` : arg;
 }
 
+// A substitution outside single quotes: its body is shell, whatever quotes it.
+const SUBSTITUTION = /\$\(|`|<\(|>\(/;
+// The naive split, kept for lines with a substitution: every separator and
+// every substitution boundary, quotes ignored, so nothing can hide behind one.
+const NAIVE_SPLIT = /&&|\|\||;|\||\n|\$\(|`|<\(|>\(|\)/;
+
 /** The first risky segment of a shell command, or null. */
 function classify(command) {
+  const risk = classifySegments(segments(command));
+  if (risk !== null) {
+    return risk;
+  }
+  // Inside a substitution the splitter counts parens, which is not bash's
+  // grammar (`case x in x)` closes early). With one on the line, also judge
+  // the naive split, and hold if that finds a risk (fail closed).
+  return SUBSTITUTION.test(command.replace(/'[^']*'/g, "")) ? classifySegments(command.split(NAIVE_SPLIT)) : null;
+}
+
+function classifySegments(list) {
   let dir = null; // where a `cd` earlier on the line moved to; null means the session folder
   const scopes = []; // dir to restore when a ( subshell ) closes
   const pushed = []; // pushd stack, for popd
-  for (const raw of segments(command)) {
+  for (const raw of list) {
     const opens = (raw.match(/^\s*\(+/)?.[0].trim().length) ?? 0;
     // Trailing redirects and & don't hide a closing ) : `(cd sub && make) > log`.
     const tail = raw.replace(/(?:\s*(?:\d*>>?|&>>?|<)\s*\S+|\s*&)+\s*$/, "");

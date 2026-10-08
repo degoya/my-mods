@@ -226,7 +226,7 @@ describe("blast-radius holds", () => {
       'git commit -m "test: cd sub && rm -rf build moves the cwd"',
       "git commit -m 'rm -rf build; git clean -fdx'",
       'echo "git push --force | rm -rf /"',
-      'echo "$(echo "(x)") || rm -rf build"', // the || is quoted text again once $( ) closes
+      "echo '$(rm -rf build)'", // single quotes: no substitution
     ]) {
       state.ran = false;
       const result = (await $.tool.call({ tool: "Bash", command } as any)) as any;
@@ -243,6 +243,9 @@ describe("blast-radius holds", () => {
       'echo "$(true)" && rm -rf build',
       'echo "$(echo "(x)")" && rm -rf build',
       'echo "odd quote && rm -rf build', // unterminated: fail closed
+      'echo "$(case x in x) rm -rf build;; esac)"', // a paren counter misreads case: fail closed
+      "diff <(rm -rf build) x", // process substitution
+      'echo "$(echo "(x)") || rm -rf build"', // quoted text, but a substitution is on the line: fail closed
     ]) {
       state.ran = false;
       const call = $.tool.call({ tool: "Bash", command } as any);
