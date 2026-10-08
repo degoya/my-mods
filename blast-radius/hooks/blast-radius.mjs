@@ -136,22 +136,21 @@ function joinDir(dir, arg) {
   return dir ? `${dir}/${arg}` : arg;
 }
 
-// A substitution outside single quotes: its body is shell, whatever quotes it.
-const SUBSTITUTION = /\$\(|`|<\(|>\(/;
 // The naive split, kept for lines with a substitution: every separator and
 // every substitution boundary, quotes ignored, so nothing can hide behind one.
 const NAIVE_SPLIT = /&&|\|\||;|\||\n|\$\(|`|<\(|>\(|\)/;
 
 /** The first risky segment of a shell command, or null. */
 function classify(command) {
-  const risk = classifySegments(segments(command));
+  const { parts, isUnsure } = segments(command);
+  const risk = classifySegments(parts);
   if (risk !== null) {
     return risk;
   }
   // Inside a substitution the splitter counts parens, which is not bash's
   // grammar (`case x in x)` closes early). With one on the line, also judge
   // the naive split, and hold if that finds a risk (fail closed).
-  return SUBSTITUTION.test(command.replace(/'[^']*'/g, "")) ? classifySegments(command.split(NAIVE_SPLIT)) : null;
+  return isUnsure ? classifySegments(command.split(NAIVE_SPLIT)) : null;
 }
 
 function classifySegments(list) {
@@ -186,11 +185,17 @@ function classifySegments(list) {
  * its own and is split like unquoted text. A line that ends inside a quote
  * or a substitution is split the naive way, so an odd quote can't hide a
  * separator (fail closed).
+ *
+ * Returns `{ parts, isUnsure }`: `isUnsure` when the line holds a substitution
+ * opener outside single quotes (`$(`, a backtick, `<(`, `>(`), read with this
+ * walker's own quote state, or ends inside a quote or substitution. The
+ * caller then judges the naive split as well.
  */
 function segments(command) {
   const out = [];
   let cur = "";
   let quote = null; // the quote we are in: ' or " or null
+  let isUnsure = false;
   const subst = []; // open substitutions: { kind: "(" | "`", depth, restore: quote outside it }
   const open = (kind) => {
     subst.push({ kind, depth: 0, restore: quote });
@@ -201,6 +206,9 @@ function segments(command) {
   for (let i = 0; i < command.length; i += 1) {
     const c = command[i];
     const next = command[i + 1];
+    if (quote !== "'" && (c === "`" || ((c === "$" || c === "<" || c === ">") && next === "("))) {
+      isUnsure = true;
+    }
     if (quote === "'") {
       cur += c;
       if (c === "'") {
@@ -247,10 +255,10 @@ function segments(command) {
     }
   }
   if (quote !== null || subst.length > 0) {
-    return command.split(/&&|\|\||;|\||\n/);
+    return { parts: command.split(/&&|\|\||;|\||\n/), isUnsure: true };
   }
   out.push(cur);
-  return out;
+  return { parts: out, isUnsure };
 }
 
 // Words that can come before the real command without changing what it does.

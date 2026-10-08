@@ -246,6 +246,7 @@ describe("blast-radius holds", () => {
       'echo "$(case x in x) rm -rf build;; esac)"', // a paren counter misreads case: fail closed
       "diff <(rm -rf build) x", // process substitution
       'echo "$(echo "(x)") || rm -rf build"', // quoted text, but a substitution is on the line: fail closed
+      "echo \"it's\" $(rm -rf build) 'x'", // an apostrophe in double quotes doesn't start a single quote
     ]) {
       state.ran = false;
       const call = $.tool.call({ tool: "Bash", command } as any);
