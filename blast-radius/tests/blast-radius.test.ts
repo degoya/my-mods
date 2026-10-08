@@ -27,7 +27,7 @@ const RM_FILES = "4 73728 1\n./build/a.js\n./build/b.js\n./build/c.js\n./build/d
 
 // The world beneath a held command: cwd, a pane (placed or not), `sleep` as a
 // wait on the mock clock, and every other process answered by `run(argv)`.
-function heldRm(on: any, placed = true, run: (argv: readonly string[]) => string = () => RM_FILES) {
+function heldRm(on: any, placed = true, run: (argv: readonly string[], init?: any) => string = () => RM_FILES) {
   const clock = mock.clock(on);
   const state = { ran: false };
   on("tool.call", { tool: "Bash" }, () => {
@@ -45,7 +45,7 @@ function heldRm(on: any, placed = true, run: (argv: readonly string[]) => string
       await clock.sleep(250);
       return { value: { ...ok, stdout: "" } };
     }
-    return { value: { ...ok, stdout: run(e.argv) } };
+    return { value: { ...ok, stdout: run(e.argv, e.init) } };
   });
   return { clock, state };
 }
@@ -189,6 +189,33 @@ describe("blast-radius holds", () => {
 
     const result = (await call) as any;
     expect(result.deny).toMatch(/drops 2 commits/);
+    expect(state.ran).toBe(false);
+    await ui.unmount();
+  });
+
+  test("a cd earlier on the line moves where rm is measured", async ($, on) => {
+    const seen: { resolve?: { arg: string; cwd?: string }; measure?: { cwd?: string } } = {};
+    const { clock, state } = heldRm(on, true, (argv, init) => {
+      if (argv[2]?.includes("pwd -P")) {
+        seen.resolve = { arg: argv[4], cwd: init?.cwd };
+        return "/work/sub\n";
+      }
+      seen.measure = { cwd: init?.cwd };
+      return RM_FILES;
+    });
+    const call = $.tool.call({ tool: "Bash", command: "cd sub && rm -rf build" } as any);
+    await clock.settle();
+
+    // The cd target is resolved from the session folder, then rm is measured there.
+    expect(seen.resolve).toEqual({ arg: "sub", cwd: "/work" });
+    expect(seen.measure).toEqual({ cwd: "/work/sub" });
+    const ui = await $.ui.mount(PANE);
+    expect(await ui.find({ type: "Text", text: /delete 4 files/ })).toBeDefined();
+    await ui.press({ key: "cancel" });
+    await clock.advance(300);
+
+    const result = (await call) as any;
+    expect(result.deny).toMatch(/the user pressed Cancel/);
     expect(state.ran).toBe(false);
     await ui.unmount();
   });
