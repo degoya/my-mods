@@ -226,11 +226,35 @@ describe("blast-radius holds", () => {
       'git commit -m "test: cd sub && rm -rf build moves the cwd"',
       "git commit -m 'rm -rf build; git clean -fdx'",
       'echo "git push --force | rm -rf /"',
+      'echo "$(echo "(x)") || rm -rf build"', // the || is quoted text again once $( ) closes
     ]) {
       state.ran = false;
       const result = (await $.tool.call({ tool: "Bash", command } as any)) as any;
       expect(result.deny).toBeUndefined();
       expect(state.ran).toBe(true);
+    }
+  });
+
+  test("a substitution inside double quotes still runs, so it is still held", async ($, on) => {
+    const { clock, state } = heldRm(on);
+    for (const command of [
+      'echo "$(cd sub && rm -rf build)"',
+      'echo "`rm -rf build; true`"',
+      'echo "$(true)" && rm -rf build',
+      'echo "$(echo "(x)")" && rm -rf build',
+      'echo "odd quote && rm -rf build', // unterminated: fail closed
+    ]) {
+      state.ran = false;
+      const call = $.tool.call({ tool: "Bash", command } as any);
+      await clock.settle();
+      const ui = await $.ui.mount(PANE);
+      expect(await ui.find({ type: "Text", text: /Blast Radius/ })).toBeDefined();
+      await ui.press({ key: "cancel" });
+      await clock.advance(300);
+      const result = (await call) as any;
+      expect(result.deny).toMatch(/the user pressed Cancel/);
+      expect(state.ran).toBe(false);
+      await ui.unmount();
     }
   });
 });

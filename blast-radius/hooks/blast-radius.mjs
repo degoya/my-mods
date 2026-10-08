@@ -163,27 +163,64 @@ function classify(command) {
   return null;
 }
 
-/** Splits a command line at && || ; | and newlines, outside quotes only. */
+/**
+ * Splits a command line at && || ; | and newlines outside quotes. A $( … ) or
+ * `…` runs as shell, unquoted or inside "…", so its body starts a segment of
+ * its own and is split like unquoted text. A line that ends inside a quote
+ * or a substitution is split the naive way, so an odd quote can't hide a
+ * separator (fail closed).
+ */
 function segments(command) {
   const out = [];
   let cur = "";
-  let quote = null;
+  let quote = null; // the quote we are in: ' or " or null
+  const subst = []; // open substitutions: { kind: "(" | "`", depth, restore: quote outside it }
+  const open = (kind) => {
+    subst.push({ kind, depth: 0, restore: quote });
+    quote = null;
+    out.push(cur);
+    cur = "";
+  };
   for (let i = 0; i < command.length; i += 1) {
     const c = command[i];
-    if (quote !== null) {
+    const next = command[i + 1];
+    if (quote === "'") {
       cur += c;
-      if (c === "\\" && quote === '"' && i + 1 < command.length) {
-        cur += command[(i += 1)];
-      } else if (c === quote) {
+      if (c === "'") {
         quote = null;
       }
     } else if (c === "\\" && i + 1 < command.length) {
       cur += c + command[(i += 1)];
+    } else if (c === "$" && next === "(") {
+      i += 1;
+      open("(");
+    } else if (c === "`" && (subst.length === 0 || subst[subst.length - 1].kind !== "`")) {
+      open("`");
+    } else if (quote === '"') {
+      cur += c;
+      if (c === '"') {
+        quote = null;
+      }
     } else if (c === '"' || c === "'") {
       quote = c;
       cur += c;
-    } else if (c === "\n" || c === ";" || c === "|" || (c === "&" && command[i + 1] === "&")) {
-      if ((c === "|" || c === "&") && command[i + 1] === c) {
+    } else if (subst.length > 0 && c === "`") {
+      cur += c;
+      quote = subst.pop().restore;
+    } else if (subst.length > 0 && c === "(") {
+      cur += c;
+      subst[subst.length - 1].depth += 1;
+    } else if (subst.length > 0 && c === ")") {
+      cur += c;
+      const top = subst[subst.length - 1];
+      if (top.depth > 0) {
+        top.depth -= 1;
+      } else if (top.kind === "(") {
+        subst.pop();
+        quote = top.restore;
+      }
+    } else if (c === "\n" || c === ";" || c === "|" || (c === "&" && next === "&")) {
+      if ((c === "|" || c === "&") && next === c) {
         i += 1; // || or &&
       }
       out.push(cur);
@@ -191,6 +228,9 @@ function segments(command) {
     } else {
       cur += c; // a lone & backgrounds, it doesn't separate
     }
+  }
+  if (quote !== null || subst.length > 0) {
+    return command.split(/&&|\|\||;|\||\n/);
   }
   out.push(cur);
   return out;
