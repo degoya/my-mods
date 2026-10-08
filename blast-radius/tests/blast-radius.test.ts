@@ -137,4 +137,31 @@ describe("blast-radius holds", () => {
     expect(state.ran).toBe(false);
     await ui.unmount();
   });
+
+  test("git clean -fdx lists the untracked paths a dry run would remove", async ($, on) => {
+    let dryRun: readonly string[] = [];
+    const { clock, state } = heldRm(on, true, (argv) => {
+      if (argv[1] !== "clean") return "";
+      dryRun = argv;
+      return "Would remove build/\nWould remove .env\nWould remove tmp/cache.bin\n";
+    });
+    const call = $.tool.call({ tool: "Bash", command: "git clean -fdx" } as any);
+    await clock.settle();
+
+    // Measured with the same flags minus -f, plus -n, so nothing is removed.
+    expect(dryRun).toEqual(["git", "clean", "-n", "-dx", "--"]);
+    const ui = await $.ui.mount(PANE);
+    expect(await ui.find({ type: "Text", text: /remove 3 untracked paths/ })).toBeDefined();
+    expect(await ui.find({ type: "Text", text: /build\// })).toBeDefined();
+    expect(await ui.find({ type: "Text", text: /\.env/ })).toBeDefined();
+    expect(await ui.find({ type: "Text", text: /tmp\/cache\.bin/ })).toBeDefined();
+    expect(await ui.find({ type: "Text", text: /can't be recovered/ })).toBeDefined();
+    await ui.press({ key: "cancel" });
+    await clock.advance(300);
+
+    const result = (await call) as any;
+    expect(result.deny).toMatch(/remove 3 untracked paths/);
+    expect(state.ran).toBe(false);
+    await ui.unmount();
+  });
 });
