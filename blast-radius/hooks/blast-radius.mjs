@@ -223,6 +223,8 @@ function segments(command) {
       }
     } else if (c === "\\" && i + 1 < command.length) {
       cur += c + command[(i += 1)];
+    } else if (quote === null && c === "$" && next === "$") {
+      cur += c + command[(i += 1)]; // $$ is the shell's pid, so a quote after it is a plain one
     } else if (quote === null && c === "$" && next === "'") {
       quote = "$'";
       cur += c + command[(i += 1)];
