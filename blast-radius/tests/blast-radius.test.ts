@@ -227,6 +227,8 @@ describe("blast-radius holds", () => {
       "git commit -m 'rm -rf build; git clean -fdx'",
       'echo "git push --force | rm -rf /"',
       "echo '$(rm -rf build)'", // single quotes: no substitution
+      "echo x # rm -rf build", // commented out
+      "echo $'rm -rf build; x'", // ANSI-C quoted text
     ]) {
       state.ran = false;
       const result = (await $.tool.call({ tool: "Bash", command } as any)) as any;
@@ -247,6 +249,9 @@ describe("blast-radius holds", () => {
       "diff <(rm -rf build) x", // process substitution
       'echo "$(echo "(x)") || rm -rf build"', // quoted text, but a substitution is on the line: fail closed
       "echo \"it's\" $(rm -rf build) 'x'", // an apostrophe in double quotes doesn't start a single quote
+      'echo x # "\nrm -rf build # "', // a quote in a comment is no quote
+      "echo $'a\\'b' && rm -rf build # '", // $'…' escapes the quote with a backslash
+      'cat <<EOF\n"\nEOF\nrm -rf build\ncat <<EOF\n"\nEOF', // heredoc bodies aren't lexed: fail closed
     ]) {
       state.ran = false;
       const call = $.tool.call({ tool: "Bash", command } as any);

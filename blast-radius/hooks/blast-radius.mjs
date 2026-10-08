@@ -214,8 +214,25 @@ function segments(command) {
       if (c === "'") {
         quote = null;
       }
+    } else if (quote === "$'") {
+      cur += c;
+      if (c === "\\" && i + 1 < command.length) {
+        cur += command[(i += 1)]; // ANSI-C quoting: \' stays inside the quote
+      } else if (c === "'") {
+        quote = null;
+      }
     } else if (c === "\\" && i + 1 < command.length) {
       cur += c + command[(i += 1)];
+    } else if (quote === null && c === "$" && next === "'") {
+      quote = "$'";
+      cur += c + command[(i += 1)];
+    } else if (quote === null && c === "#" && (i === 0 || /\s/.test(command[i - 1]))) {
+      while (i + 1 < command.length && command[i + 1] !== "\n") {
+        i += 1; // a comment runs to the newline, which still separates
+      }
+    } else if (quote === null && c === "<" && next === "<") {
+      cur += c;
+      isUnsure = true; // a heredoc body is not lexed here: judge the naive split too
     } else if (c === "$" && next === "(") {
       i += 1;
       open("(");
