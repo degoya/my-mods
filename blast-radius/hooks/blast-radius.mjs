@@ -141,7 +141,7 @@ function classify(command) {
   let dir = null; // where a `cd` earlier on the line moved to; null means the session folder
   const scopes = []; // dir to restore when a ( subshell ) closes
   const pushed = []; // pushd stack, for popd
-  for (const raw of command.split(/&&|\|\||;|\||\n/)) {
+  for (const raw of segments(command)) {
     const opens = (raw.match(/^\s*\(+/)?.[0].trim().length) ?? 0;
     // Trailing redirects and & don't hide a closing ) : `(cd sub && make) > log`.
     const tail = raw.replace(/(?:\s*(?:\d*>>?|&>>?|<)\s*\S+|\s*&)+\s*$/, "");
@@ -161,6 +161,39 @@ function classify(command) {
     }
   }
   return null;
+}
+
+/** Splits a command line at && || ; | and newlines, outside quotes only. */
+function segments(command) {
+  const out = [];
+  let cur = "";
+  let quote = null;
+  for (let i = 0; i < command.length; i += 1) {
+    const c = command[i];
+    if (quote !== null) {
+      cur += c;
+      if (c === "\\" && quote === '"' && i + 1 < command.length) {
+        cur += command[(i += 1)];
+      } else if (c === quote) {
+        quote = null;
+      }
+    } else if (c === "\\" && i + 1 < command.length) {
+      cur += c + command[(i += 1)];
+    } else if (c === '"' || c === "'") {
+      quote = c;
+      cur += c;
+    } else if (c === "\n" || c === ";" || c === "|" || (c === "&" && command[i + 1] === "&")) {
+      if ((c === "|" || c === "&") && command[i + 1] === c) {
+        i += 1; // || or &&
+      }
+      out.push(cur);
+      cur = "";
+    } else {
+      cur += c; // a lone & backgrounds, it doesn't separate
+    }
+  }
+  out.push(cur);
+  return out;
 }
 
 // Words that can come before the real command without changing what it does.

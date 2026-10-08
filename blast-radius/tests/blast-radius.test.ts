@@ -219,4 +219,18 @@ describe("blast-radius holds", () => {
     expect(state.ran).toBe(false);
     await ui.unmount();
   });
+
+  test("a risky command quoted inside another is not held", async ($, on) => {
+    const { state } = heldRm(on);
+    for (const command of [
+      'git commit -m "test: cd sub && rm -rf build moves the cwd"',
+      "git commit -m 'rm -rf build; git clean -fdx'",
+      'echo "git push --force | rm -rf /"',
+    ]) {
+      state.ran = false;
+      const result = (await $.tool.call({ tool: "Bash", command } as any)) as any;
+      expect(result.deny).toBeUndefined();
+      expect(state.ran).toBe(true);
+    }
+  });
 });
