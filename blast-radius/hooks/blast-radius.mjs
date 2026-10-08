@@ -232,8 +232,9 @@ function segments(command) {
         i += 1; // a comment runs to the newline, which still separates
       }
       // Bash reads # as text after an escaped space, inside ${ } or (( )). A
-      // separator in what was skipped may then be real: judge the naive split too.
-      if (/&&|\|\||;|\|/.test(command.slice(start, i + 1))) {
+      // separator or substitution in what was skipped may then be real: judge
+      // the naive split too.
+      if (/&&|\|\||;|\||\$\(|`|<\(|>\(/.test(command.slice(start, i + 1))) {
         isUnsure = true;
       }
     } else if (quote === null && c === "#") {
