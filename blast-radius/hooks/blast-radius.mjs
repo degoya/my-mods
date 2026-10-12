@@ -53,6 +53,9 @@ export function register(on) {
         ? { summary: `${risk.label} in ${risk.dir}`, lines: [], note: `Couldn't find the folder ${risk.dir}, so I couldn't measure what this would change.` }
         : await measure($, risk, cwd);
       summary = mine.report.summary;
+      if (mine.report.harmless && !risk.isUnsure) {
+        return next(e); // the measurement found nothing to lose, so don't ask
+      }
 
       opened = await $.ui.open({ id: PANE_ID, title: "Blast Radius", focus: true, rows: paneRows(mine.report) });
       if (!opened.isPlaced) {
@@ -143,14 +146,13 @@ const NAIVE_SPLIT = /&&|\|\||;|\||\n|\$\(|`|<\(|>\(|\)/;
 /** The first risky segment of a shell command, or null. */
 function classify(command) {
   const { parts, isUnsure } = segments(command);
-  const risk = classifySegments(parts);
-  if (risk !== null) {
-    return risk;
-  }
   // Inside a substitution the splitter counts parens, which is not bash's
   // grammar (`case x in x)` closes early). With one on the line, also judge
   // the naive split, and hold if that finds a risk (fail closed).
-  return isUnsure ? classifySegments(command.split(NAIVE_SPLIT)) : null;
+  const risk = classifySegments(parts) ?? (isUnsure ? classifySegments(command.split(NAIVE_SPLIT)) : null);
+  // On such a line the targets or the folder may be misread, so a measurement
+  // of "nothing to lose" can't be trusted: it is always held.
+  return risk !== null && isUnsure ? { ...risk, isUnsure } : risk;
 }
 
 function classifySegments(list) {
@@ -465,10 +467,10 @@ async function measureRm($, risk, cwd) {
   const [head, ...rest] = run.stdout.split("\n").filter((l) => l !== "");
   const [files, bytes, found] = (head ?? "0 0 0").split(" ").map(Number);
   if (!found) {
-    return { summary: `delete nothing: no file matches ${risk.targets.join(" ")}`, lines: [], note: "The paths don't exist, so rm has nothing to remove." };
+    return { summary: `delete nothing: no file matches ${risk.targets.join(" ")}`, lines: [], note: "The paths don't exist, so rm has nothing to remove.", harmless: true };
   }
   if (!files) {
-    return { summary: `delete ${found} ${found === 1 ? "path" : "paths"} with no files in ${found === 1 ? "it" : "them"}`, lines: [], note: `Paths: ${risk.targets.join(" ")}` };
+    return { summary: `delete ${found} ${found === 1 ? "path" : "paths"} with no files in ${found === 1 ? "it" : "them"}`, lines: [], note: `Paths: ${risk.targets.join(" ")}`, harmless: true };
   }
   return {
     summary: `delete ${files} ${files === 1 ? "file" : "files"} (about ${size(bytes)})`,
@@ -515,6 +517,7 @@ async function measureGit($, risk, cwd) {
       lines: gone.slice(0, LIST_MAX),
       more: Math.max(0, gone.length - LIST_MAX),
       note: "From git clean -n. Untracked files are not in git, so they can't be recovered.",
+      harmless: gone.length === 0,
     };
   }
   const status = await $.process.run(["git", "status", "--porcelain"], { cwd, timeoutMs: 15000 });
@@ -525,7 +528,14 @@ async function measureGit($, risk, cwd) {
   // reset --hard drops staged and unstaged changes; checkout -- . drops unstaged ones.
   const lost = risk.kind === "git-reset" ? rows : rows.filter((l) => l[1] !== " ");
   const stat = await $.process.run(["git", "diff", "--shortstat", risk.kind === "git-reset" ? "HEAD" : "--"], { cwd, timeoutMs: 15000 });
+  // Harmless only on a tree with no tracked changes and no other commit or
+  // source named: `reset --hard HEAD~1` moves the branch, `checkout main -- .`
+  // overwrites files, even when nothing is uncommitted.
+  const plain = risk.kind === "git-reset"
+    ? risk.args.every((a) => a.startsWith("-") || a === "HEAD")
+    : risk.args.every((a) => a === "." || a === "--" || (a.startsWith("-") && !a.startsWith("--source") && a !== "-s"));
   return {
+    harmless: plain && rows.length === 0,
     summary: lost.length === 0 ? "discard nothing: no uncommitted changes" : `discard uncommitted changes in ${lost.length} ${lost.length === 1 ? "file" : "files"}`,
     lines: lost.slice(0, LIST_MAX).map((l) => `${l.slice(0, 2)} ${l.slice(3)}`),
     more: Math.max(0, lost.length - LIST_MAX),
@@ -593,6 +603,7 @@ async function measureMigrations($, risk, cwd) {
     lines: pending.slice(0, LIST_MAX),
     more: Math.max(0, pending.length - LIST_MAX),
     note: `From ${lister.argv.join(" ")}.`,
+    harmless: pending.length === 0,
   };
 }
 

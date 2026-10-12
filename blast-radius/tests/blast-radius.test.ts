@@ -29,13 +29,16 @@ const RM_FILES = "4 73728 1\n./build/a.js\n./build/b.js\n./build/c.js\n./build/d
 // wait on the mock clock, and every other process answered by `run(argv)`.
 function heldRm(on: any, placed = true, run: (argv: readonly string[], init?: any) => string = () => RM_FILES) {
   const clock = mock.clock(on);
-  const state = { ran: false };
+  const state = { ran: false, opened: 0 };
   on("tool.call", { tool: "Bash" }, () => {
     state.ran = true;
     return { result: { stdout: "", stderr: "", interrupted: false } } as any;
   });
   on("session.cwd", () => ({ value: "/work" }));
-  on("ui.open", () => ({ value: placed ? { isPlaced: true } : { isPlaced: false, reason: "narrow" } }));
+  on("ui.open", () => {
+    state.opened += 1;
+    return { value: placed ? { isPlaced: true } : { isPlaced: false, reason: "narrow" } };
+  });
   on("ui.close", () => ({ value: undefined }));
   on("ui.invalidate", () => ({ value: undefined }));
   on("ui.toast", () => ({ value: undefined }));
@@ -272,5 +275,58 @@ describe("blast-radius holds", () => {
       expect(state.ran).toBe(false);
       await ui.unmount();
     }
+  });
+});
+
+describe("blast-radius asks only when something would be lost", () => {
+  test("a risky command that would lose nothing runs without a pane", async ($, on) => {
+    let run = (argv: readonly string[]) => "";
+    const { state } = heldRm(on, true, (argv) => run(argv));
+    for (const [command, answer] of [
+      ["rm -rf build", () => "0 0 0\n"], // no such path
+      ["rm -rf build", () => "0 0 1\n"], // an empty folder: no files in it
+      ["git clean -fd", () => ""], // the dry run removes nothing
+      ["git reset --hard", (argv: readonly string[]) => (argv[1] === "status" ? "?? notes.txt\n" : "")], // only untracked
+      ["git checkout -- .", () => ""], // a clean tree
+    ] as const) {
+      run = answer;
+      state.ran = false;
+      const result = (await $.tool.call({ tool: "Bash", command } as any)) as any;
+      expect(result.deny).toBeUndefined();
+      expect(state.ran).toBe(true);
+      expect(state.opened).toBe(0);
+    }
+  });
+
+  test("a clean tree is still held when another commit or source is named", async ($, on) => {
+    const { clock, state } = heldRm(on, true, () => "");
+    for (const command of ["git reset --hard HEAD~1", "git checkout main -- ."]) {
+      state.ran = false;
+      state.opened = 0;
+      const call = $.tool.call({ tool: "Bash", command } as any);
+      await clock.settle();
+      expect(state.opened).toBe(1);
+      const ui = await $.ui.mount(PANE);
+      await ui.press({ key: "cancel" });
+      await clock.advance(300);
+      expect(((await call) as any).deny).toMatch(/the user pressed Cancel/);
+      expect(state.ran).toBe(false);
+      await ui.unmount();
+    }
+  });
+
+  test("a line the splitter is unsure of is held even when nothing would be lost", async ($, on) => {
+    // The cd inside the substitution may be misread, so "no such path" can't be trusted.
+    const { clock, state } = heldRm(on, true, () => "0 0 0\n");
+    const call = $.tool.call({ tool: "Bash", command: 'echo "$(cd sub && rm -rf build)"' } as any);
+    await clock.settle();
+    expect(state.opened).toBe(1);
+    const ui = await $.ui.mount(PANE);
+    expect(await ui.find({ type: "Text", text: /delete nothing/ })).toBeDefined();
+    await ui.press({ key: "cancel" });
+    await clock.advance(300);
+    expect(((await call) as any).deny).toMatch(/the user pressed Cancel/);
+    expect(state.ran).toBe(false);
+    await ui.unmount();
   });
 });
