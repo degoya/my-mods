@@ -53,7 +53,7 @@ export function register(on) {
         ? { summary: `${risk.label} in ${risk.dir}`, lines: [], note: `Couldn't find the folder ${risk.dir}, so I couldn't measure what this would change.` }
         : await measure($, risk, cwd);
       summary = mine.report.summary;
-      if (mine.report.harmless && !risk.isUnsure) {
+      if (mine.report.harmless && risk.isAlone && !risk.isUnsure) {
         return next(e); // the measurement found nothing to lose, so don't ask
       }
 
@@ -159,6 +159,8 @@ function classifySegments(list) {
   let dir = null; // where a `cd` earlier on the line moved to; null means the session folder
   const scopes = []; // dir to restore when a ( subshell ) closes
   const pushed = []; // pushd stack, for popd
+  let found = null; // the first risky segment, the one that is measured
+  let others = 0; // segments besides it that do more than move the folder
   for (const raw of list) {
     const opens = (raw.match(/^\s*\(+/)?.[0].trim().length) ?? 0;
     // Trailing redirects and & don't hide a closing ) : `(cd sub && make) > log`.
@@ -168,17 +170,25 @@ function classifySegments(list) {
       scopes.push(dir);
     }
     const risk = classifySegment(raw, dir, pushed);
-    if (risk !== null && risk.cd === undefined) {
-      return risk;
-    }
-    if (risk !== null) {
+    if (risk === null) {
+      if (/[^\s(){}]/.test(raw)) {
+        others += 1;
+      }
+    } else if (risk.cd !== undefined) {
       dir = risk.cd; // a cd, pushd or popd moved the folder
+    } else if (found === null) {
+      found = risk;
+    } else {
+      others += 1;
     }
     for (let k = 0; k < closes && scopes.length > 0; k += 1) {
       dir = scopes.pop(); // a cd inside ( ... ) doesn't outlive it
     }
   }
-  return null;
+  // Only the first risk is measured, so "nothing to lose" holds for the line
+  // only when nothing else on it runs: `mv data gone && rm -rf gone` and
+  // `rm -rf nope && rm -rf data` both measure nothing and lose data.
+  return found === null ? null : { ...found, isAlone: others === 0 };
 }
 
 /**

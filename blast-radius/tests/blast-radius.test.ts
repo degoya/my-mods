@@ -315,6 +315,32 @@ describe("blast-radius asks only when something would be lost", () => {
     }
   });
 
+  test("a line with another command on it is held even when the measured one loses nothing", async ($, on) => {
+    // Only the first risk is measured: the mv or the second rm would go unseen.
+    const { clock, state } = heldRm(on, true, () => "0 0 0\n");
+    for (const command of ["mv data gone && rm -rf gone", "rm -rf nope && rm -rf data", "rm -rf nope; make clean"]) {
+      state.ran = false;
+      state.opened = 0;
+      const call = $.tool.call({ tool: "Bash", command } as any);
+      await clock.settle();
+      expect(state.opened).toBe(1);
+      const ui = await $.ui.mount(PANE);
+      await ui.press({ key: "cancel" });
+      await clock.advance(300);
+      expect(((await call) as any).deny).toMatch(/the user pressed Cancel/);
+      expect(state.ran).toBe(false);
+      await ui.unmount();
+    }
+  });
+
+  test("a cd before the command still lets a harmless one run", async ($, on) => {
+    const { state } = heldRm(on, true, (argv) => (argv[2]?.includes("pwd -P") ? "/work/sub\n" : "0 0 0\n"));
+    const result = (await $.tool.call({ tool: "Bash", command: "cd sub && rm -rf build" } as any)) as any;
+    expect(result.deny).toBeUndefined();
+    expect(state.ran).toBe(true);
+    expect(state.opened).toBe(0);
+  });
+
   test("a line the splitter is unsure of is held even when nothing would be lost", async ($, on) => {
     // The cd inside the substitution may be misread, so "no such path" can't be trusted.
     const { clock, state } = heldRm(on, true, () => "0 0 0\n");
